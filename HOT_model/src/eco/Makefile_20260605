@@ -1,0 +1,214 @@
+#
+# Makefile for Regional Testbed Code (Fully fixed for Tapenade 3.16 & json-c)
+#
+JSONC_PATH = /lib64
+#----------------------------------------------------------------------------
+#      CVS:$Id: Makefile,v 1.13 2014/06/23 Luo 
+#      CVS:$Name:  $
+#----------------------------------------------------------------------------
+
+MAIN=	driver.o
+OBJS= 	common_mod.o		cost.o		\
+	derivs_mod.o 		eco_common.o		eco_derivs.o	\
+	eco_params.o		forcing.o		grid.o		\
+	io.o					light.o		\
+	model_mod.o		numeric_subs.o		physderivs_mod.o\
+	types.o
+ADJMAIN=adjoint_driver.o
+ADJOBS=	adcost.o		adderivs_mod.o		adeco_common.o	\
+	adeco_derivs.o		adj_common.o				\
+	adlight.o		admodel_mod.o		adnumeric_subs.o\
+	adphysderivs_mod.o	hessian_mod.o		m1qn3_mod.o	\
+	adContext.o		adProfile.o	\
+	adStack.o
+ADJTEST=adjoint_test.o
+HESSIAN=hessian_driver.o
+OPTMAIN=	opt_driver.o
+OPTOBJS= 	common_mod.o		cost.o		\
+	derivs_mod.o 		eco_common.o		eco_derivs.o	\
+	eco_params.o		forcing.o		grid.o		\
+	io.o					light.o		\
+	model_mod.o		numeric_subs.o		physderivs_mod.o\
+	types.o		newuoa_mod.o		opt_common.o
+
+#################################################################
+# Intel fortran compiler & GCC Configuration
+#################################################################
+FC = ifort
+CC = gcc
+
+# Fortran单步编译标志：仅使用-O3标量/向量化极限加速，彻底移除-ipo，防止跨语言中间件冲突
+FFLAGS = -O3 -r8 $(DFLAGS)
+
+# C语言编译标志：开启C99/GNU扩展，适配Tapenade高精度时钟
+CFLAGS = -std=gnu99 -O2
+
+# 头文件路径
+INCLUDES = -I/usr/local/netcdf-3.6.2/include
+
+# 外部静态库与动态库联合路径（强制引入绝对路径静态库实体）
+LIBS = -L/usr/local/netcdf-3.6.2/lib -lnetcdf -lrt -L/lib64 -ljson-c
+LDFLAGS += -Wl,-rpath,/lib64
+RM = rm -f
+
+VPATH = ../framework
+
+#
+# compile rules
+#
+.SUFFIXES:
+.SUFFIXES: .F .F90 .f90 .f .for .c .o
+
+.F.o: 
+	$(FC) $(FFLAGS) $(INCLUDES) -c   $<
+.F90.o:
+	$(FC) $(FFLAGS) $(INCLUDES) -c   $<
+.f.o: 
+	$(FC) $(FFLAGS) $(INCLUDES) -c   $<
+.for.o: 
+	$(FC) $(FFLAGS) $(INCLUDES) -c   $<
+.f90.o:
+	$(FC) $(FFLAGS) $(INCLUDES) -c   $<
+.c.o:
+	$(CC) $(CFLAGS) $(INCLUDES) -c   $<
+.f:
+	$(FC)  $(FFLAGS) $(INCLUDES) $< -o  $@
+.for:
+	$(FC)  $(FFLAGS) $(INCLUDES) $< -o  $@
+.f90:
+	$(FC)  $(FFLAGS) $(INCLUDES) $< -o  $@
+.c:
+	$(CC)  $< -o  $@
+
+all: driver adjoint_driver test_adjoint hessian_driver opt_driver
+
+# 1. 主模型驱动：不包含C代码，可安全使用-ipo进行多文件优化提升性能
+driver:
+	$(FC) -O3 -r8 $(DFLAGS) -o driver $(MAIN) $(OBJS) $(LIBS)
+
+# 2. 伴随模型驱动：包含混编C组件，硬编码强制使用标准链接，杜绝-ipo干扰
+adjoint_driver:
+	$(FC) -O2 -r8 $(DFLAGS) -o adjoint_driver $(ADJMAIN) $(OBJS) $(ADJOBS) $(LIBS)
+
+# 3. 伴随测试驱动：硬编码强制标准链接
+test_adjoint: $(ADJTEST) $(OBJS) $(ADJOBS)
+	$(FC) -r8 $(DFLAGS) -o test_adjoint $(ADJTEST) $(OBJS) $(ADJOBS) -Wl,--start-group $(LIBS) -Wl,--end-group
+
+# 4. Hessian驱动：硬编码强制标准链接
+hessian_driver: $(HESSIAN) $(OBJS) $(ADJOBS)
+	$(FC) -r8 $(DFLAGS) -o hessian_driver $(HESSIAN) $(OBJS) $(ADJOBS) -Wl,--start-group $(LIBS) -Wl,--end-group
+
+# 5. 优化驱动：安全走多文件优化流程
+opt_driver: $(OPTMAIN) $(OPTOBJS)
+	$(FC) -O3 -ipo -r8 $(DFLAGS) -o opt_driver $(OPTMAIN) $(OPTOBJS) -Wl,--start-group $(LIBS) -Wl,--end-group
+
+adcost.o:		const.o			cost.o		\
+			grid.o
+adderivs_mod.o:		adeco_common.o		const.o		\
+			eco_common.o		eco_params.o	\
+			adStack.o
+adeco_common.o:		grid.o			
+adeco_derivs.o:		adderivs_mod.o		adeco_common.o	\
+			adlight.o				\
+			const.o			cost.o		\
+			eco_common.o		eco_params.o	\
+			forcing.o		grid.o
+adj_common.o:
+adjoint_driver.o: 	adj_common.o		admodel_mod.o	\
+			common_mod.o		const.o		\
+			cost.o			eco_common.o	\
+			eco_derivs.o		eco_params.o	\
+			forcing.o		grid.o		\
+			hessian_mod.o		io.o		\
+			light.o		\
+			model_mod.o		m1qn3_mod.o		
+adjoint_test.o: 	adj_common.o		admodel_mod.o	\
+			common_mod.o		const.o		\
+			cost.o			eco_common.o	\
+			eco_derivs.o		eco_params.o	\
+			forcing.o		grid.o		\
+			io.o			light.o		\
+			model_mod.o		m1qn3_mod.o
+adlight.o:		const.o			grid.o		\
+			light.o
+admodel_mod.o:		adcost.o		adeco_derivs.o	\
+			adphysderivs_mod.o	common_mod.o	\
+			const.o			cost.o		\
+			eco_derivs.o		eco_params.o	\
+			forcing.o		grid.o		\
+			io.o			model_mod.o	\
+			physderivs_mod.o
+adnumeric_subs.o:	const.o	
+adphysderivs_mod.o:	adnumeric_subs.o	common_mod.o	\
+			const.o			eco_common.o	\
+			eco_params.o		grid.o		\
+			physderivs_mod.o
+common_mod.o:		const.o			eco_params.o	
+const.o:		
+cost.o:			common_mod.o		const.o		\
+			forcing.o		grid.o	
+derivs_mod.o:		const.o			eco_common.o	\
+			eco_params.o			io.o
+driver.o: 		common_mod.o		cost.o		\
+			eco_common.o		eco_derivs.o	\
+			eco_params.o		forcing.o	\
+			grid.o			io.o		\
+			light.o			model_mod.o
+eco_common.o:		common_mod.o		cost.o		\
+			eco_params.o		grid.o		\
+					types.o
+eco_derivs.o:	 	common_mod.o		const.o		\
+			cost.o			derivs_mod.o	\
+			eco_common.o		eco_params.o	\
+			forcing.o		grid.o		\
+			light.o
+eco_params.o:		
+forcing.o:		common_mod.o		const.o		\
+			grid.o
+grid.o:			common_mod.o		const.o		\
+
+hessian_driver.o:	admodel_mod.o		common_mod.o	\
+			const.o		\
+			cost.o			eco_common.o	\
+			eco_derivs.o		eco_params.o	\
+			forcing.o		grid.o		\
+			io.o			light.o		\
+			model_mod.o
+hessian_mod.o:		const.o			eco_params.o	\
+
+io.o:			common_mod.o		cost.o		\
+			eco_common.o		eco_params.o	\
+			forcing.o		grid.o		\
+			types.o
+light.o: 		const.o			grid.o		\
+
+model_mod.o: 		common_mod.o		const.o		\
+			cost.o			eco_derivs.o	\
+			eco_params.o		forcing.o	\
+			grid.o			io.o		\
+			physderivs_mod.o
+m1qn3_mod.o:		hessian_mod.o
+numeric_subs.o:		
+physderivs_mod.o:	common_mod.o		const.o		\
+			eco_common.o		eco_params.o	\
+			forcing.o		grid.o		\
+			numeric_subs.o
+types.o:		
+adContext.o: adContext.c
+	$(CC) $(CFLAGS) -c adContext.c
+
+adProfile.o: adProfile.c
+	$(CC) $(CFLAGS) -c adProfile.c
+
+adStack.o: adStack.c
+	$(CC) $(CFLAGS) -c adStack.c
+opt_driver.o: 		common_mod.o		cost.o		\
+			eco_common.o		eco_derivs.o	\
+			eco_params.o		forcing.o	\
+			grid.o			io.o		\
+			light.o			model_mod.o	\
+			newuoa_mod.o		opt_common.o
+newuoa_mod.o:	model_mod.o	eco_params.o	io.o
+opt_common.o: 		common_mod.o	eco_params.o
+clean: 
+	$(RM) *.o *.oo *.mod driver adjoint_driver test_adjoint hessian_driver opt_driver
