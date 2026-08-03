@@ -1,7 +1,0 @@
-cd ~/HOT_MB2/src/eco
-gmake clean
-gmake
-./adjoint_driver <input	
-./hessian_driver <input_hess
-./test_adjoint <input_hess
-
